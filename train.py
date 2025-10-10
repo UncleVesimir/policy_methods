@@ -197,7 +197,7 @@ def train(
             if render:
                 env_obj.render()
             if not load_model_checkpoint:
-                agent.store_transition(state, action, reward, next_state, done)
+                agent.store_transition(state, action, reward, next_state, truncated, terminated)
                 agent.learn()
 
             state = next_state

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 
-class PolicyNetwork(nn.Module):
+class ActorCriticNetwork(nn.Module):
     def __init__(self, n_actions=None, input_dims=None, file_name=None, lr=0.001, checkpoint_dir="models/Unknown"):
         super().__init__()
         if n_actions is None or input_dims is None or file_name is None:
@@ -47,7 +47,7 @@ class PolicyNetwork(nn.Module):
             return int(np.prod(dims.size()))
     
 
-    def forward(self, state):
+    def forward(self, state) -> tuple[torch.Tensor, torch.Tensor]:
         """ forward pass """
         
         conv1 = F.relu(self.conv1(state))
@@ -55,6 +55,7 @@ class PolicyNetwork(nn.Module):
         conv3 = F.relu(self.conv3(conv2)) # conv3 output is shape batch_size x filters x H x W
         flat = conv3.view(conv3.size()[0], -1)  # flatten 
         fc1 = F.relu(self.fc1(flat))
+        
         action_logits = self.actor(fc1)
         critic_value = self.critic(fc1)
 

@@ -28,6 +28,7 @@ class REINFORCEAgent(EpisodeBufferAgent):
         )
 
         self.networks = [self.policy] # for savings model dicts
+        self.action_probs_store = []
 
     def choose_action(self, state):
         state = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(device=self.policy.device)
@@ -35,7 +36,8 @@ class REINFORCEAgent(EpisodeBufferAgent):
         dist = torch.distributions.Categorical(logits=logits)
         action = dist.sample()
         log_prob = dist.log_prob(action)
-        self.memory.store_action_prob(log_prob) ## bad code, but hacky way of storing log prob without changing main training loop in train.py
+
+        self.action_probs_store.append(log_prob) ## bad code, but hacky way of storing log prob without changing main training loop in train.py
 
         return action.item()
     
@@ -51,7 +53,8 @@ class REINFORCEAgent(EpisodeBufferAgent):
         if self.episode_is_terminal():
             self.policy.optimizer.zero_grad()
 
-            _, _, action_probs, rewards, _, _ = self.sample_episode()
+            _, _, rewards, _, _ = self.sample_episode()
+            action_probs = torch.stack(self.action_probs_store).to(self.policy.device)
 
             returns = self._compute_cumsum_returns(rewards, self.gamma)
             # Update baseline

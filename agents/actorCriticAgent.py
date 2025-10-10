@@ -14,10 +14,12 @@ class ActorCriticAgent(EpisodeBufferAgent):
         Based on Williams, R. J. (1992). Simple statistical gradient-following algorithms for connectionist reinforcement learning.
     """
 
-    def __init__(self, baseline_alpha=0.01, model_name="DQN", *args, **kwargs):
+    def __init__(self, model_name="DQN", n_steps=6, value_coef=0.5, entropy_coef=0.01, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.baseline_avg = 0.0
-        self.baseline_alpha = baseline_alpha
+        self.n_steps = max(1, n_steps)
+        self.value_coef = value_coef
+        self.entropy_coef = entropy_coef
+
         self.checkpoint_dir = f"models/{model_name}/{sanitize_file_string(self.env_name)}"
         self.filename_root = f"{model_name}_{sanitize_file_string(self.env_name)}_lr{self.learning_rate}_gamma{self.gamma}_eps{self.epsilon}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
@@ -26,62 +28,91 @@ class ActorCriticAgent(EpisodeBufferAgent):
             input_dims=self.input_dims,
             file_name=self.filename_root + "_eval"
         )
-        self.value_store = []
-        self.entropy_store = []
-        self.action_prob_store = []
+
 
         self.networks = [self.policy] # for savings model dicts
 
     def choose_action(self, state):
         state = torch.tensor(state, dtype=torch.float).unsqueeze(0).to(device=self.policy.device)
-        actor_logits, critic_value = self.policy(state)
-        dist = torch.distributions.Categorical(logits=logits)
+        with torch.no_grad():
+            actor_logits, _ = self.policy(state)
 
+        dist = torch.distributions.Categorical(logits=actor_logits)
         action = dist.sample()
-        log_prob = dist.log_prob(action)
-        entropy = dist.entropy()
-
-        self.action_prob_store.append(log_prob)
-        self.value_store.append(critic_value.squeeze(-1))
-        self.entropy_store.append(entropy)
 
         return action.item()
     
-    def _compute_cumsum_returns(self, rewards: torch.Tensor, gamma=0.99):
+    def _compute_n_step_returns(self, rewards: torch.Tensor, truncateds: torch.Tensor, terminals: torch.Tensor,
+                                V: torch.Tensor, V_next: torch.Tensor | None = None, n_steps: int = 1, gamma: float = 0.99,
+                                treat_truncation_as_terminal: bool = False
+                                ):
+        T = len(rewards)
         returns = torch.zeros_like(rewards)
-        running = 0
-        for t in reversed(range(len(rewards))):
-            running = rewards[t] + gamma * running
-            returns[t] = running
+        
+        for t in range(T):
+            ret = 0.0
+            discount = 1.0
+            for i in range(n_steps):
+                if t + i < T:
+                    ret += discount * rewards[t+i]
+                    if terminals[t+i]:
+                        break
+                    discount *= gamma
+            else: # if loop completed without break, we didn't terminate, so check if TD window is inbounds, and if not, check truncation
+                if t + n_steps < T:
+                    ret += discount * V[t+n_steps]
+                elif truncateds[-1] and not treat_truncation_as_terminal and V_next is not None: # TD step out of bounds, so check if truncated
+                    ret += discount * V_next[-1]
+            returns[t] = ret
+            
         return returns
     
     def learn(self):
-        if self.episode_is_terminal():
-            self.policy.optimizer.zero_grad()
-
-            states, actions, rewards, next_states, terminals = self.sample_episode()
-            
-            with torch.no_grad():
-                _, next_values = self.policy(next_states)
-
-            values = torch.stack(self.value_store).to(self.policy.device)          # [T]
-            action_probs = torch.stack(self.action_prob_store).to(self.policy.device)  # [     
-            
-            targets = rewards + gamma * next_values * (~terminals)                # [T]
-            advantages = (targets - values).detach()
-
-
-            polcicy_loss = (-action_probs * advantages).mean()
-            critic_loss = 0.5 * (targets - values).pow(2).mean()
-
-            entropy_loss = -0.01 * torch.stack(self.entropy_store).mean()
-            loss = polcicy_loss + critic_loss + entropy_loss
-
-            loss.backward()
-
-                # Clip gradients to prevent large updates
-            # torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+        if not self.episode_is_terminal():
+            return
         
-            self.policy.optimizer.step()
+        self.policy.optimizer.zero_grad()
 
-            self.learn_step_cnt += 1
+        states, actions, rewards, next_states, truncateds, terminals = self.sample_episode()
+
+        logits, values      = self.policy(states)           # logits: [T, A], values: [T, 1] or [T]
+
+        with torch.no_grad():
+            _,     next_values  = self.policy(next_states)      # next_values: [T, 1] or [T]
+
+        values = values.squeeze(-1)
+        next_values = next_values.squeeze(-1)
+
+        # log_probs for taken actions (vectorized)
+        dist = torch.distributions.Categorical(logits=logits)
+        log_probs = dist.log_prob(actions)                  # [T]
+        entropies = dist.entropy()      
+        
+        targets = self._compute_n_step_returns(
+            rewards,
+            truncateds,
+            terminals,
+            values,
+            next_values,
+            self.n_steps,
+            self.gamma
+        )
+
+        advantages = (targets - values).detach()
+        advantages = (advantages - advantages.mean())/ (advantages.std() + 1e-8)
+
+
+        policy_loss = (-log_probs * advantages).mean()
+        critic_loss = self.value_coef * (targets - values).pow(2).mean()
+
+        entropy_loss = -self.entropy_coef * entropies.mean()
+
+        loss = policy_loss + critic_loss + entropy_loss
+        loss.backward()
+
+        # Clip gradients to prevent large updates
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+        self.policy.optimizer.step()
+
+        self.learn_step_cnt += 1
+        self.memory.clear_memory()
