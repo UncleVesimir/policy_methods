@@ -4,11 +4,11 @@ from utils import sanitize_file_string
 import torch
 
 from networks.actorCriticNetwork import ActorCriticNetwork
-from agents.common.EpisodeBufferAgent import EpisodeBufferAgent
+from agents.common.SlidingWindowBufferAgent import SlidingWindowBufferAgent
 
 
 
-class ActorCriticAgent(EpisodeBufferAgent):
+class ActorCriticAgent(SlidingWindowBufferAgent):
     """
         Actor Critic Agent
         Based on Williams, R. J. (1992). Simple statistical gradient-following algorithms for connectionist reinforcement learning.
@@ -68,12 +68,12 @@ class ActorCriticAgent(EpisodeBufferAgent):
         return returns
     
     def learn(self):
-        if not self.episode_is_terminal():
+        if not self.is_ready() or not self.last_done_flag():
             return
         
         self.policy.optimizer.zero_grad()
 
-        states, actions, rewards, next_states, truncateds, terminals = self.sample_episode()
+        states, actions, rewards, next_states, truncateds, terminals = self.sample_rollout()
 
         logits, values      = self.policy(states)           # logits: [T, A], values: [T, 1] or [T]
 
@@ -92,10 +92,11 @@ class ActorCriticAgent(EpisodeBufferAgent):
             rewards,
             truncateds,
             terminals,
-            values,
+            values.detach(),
             next_values,
             self.n_steps,
-            self.gamma
+            self.gamma,
+            treat_truncation_as_terminal=False
         )
 
         advantages = (targets - values).detach()
@@ -111,8 +112,19 @@ class ActorCriticAgent(EpisodeBufferAgent):
         loss.backward()
 
         # Clip gradients to prevent large updates
-        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=0.5)
         self.policy.optimizer.step()
 
         self.learn_step_cnt += 1
-        self.memory.clear_memory()
+        if self.learn_step_cnt % 20 == 0:
+            print({
+                "entropy": entropies.mean().item(),
+                "adv_mean": advantages.mean().item(),
+                "adv_std": advantages.std().item(),
+                "V_mean": values.mean().item(),
+                "V_std": values.std().item(),
+                "pi_loss": policy_loss.item(),
+                "V_loss": critic_loss.item(),
+                "grad_norm": grad_norm.item()
+            })
+        self.pop_left()

@@ -11,7 +11,7 @@ import torch.optim as optim
 
 
 class ActorCriticNetwork(nn.Module):
-    def __init__(self, n_actions=None, input_dims=None, file_name=None, lr=0.001, checkpoint_dir="models/Unknown"):
+    def __init__(self, n_actions=None, input_dims=None, file_name=None, lr=1e-4, checkpoint_dir="models/Unknown"):
         super().__init__()
         if n_actions is None or input_dims is None or file_name is None:
             raise ValueError("n_actions, input_dims, and file_name must be provided.")
@@ -31,7 +31,7 @@ class ActorCriticNetwork(nn.Module):
         self.critic = nn.Linear(512, 1)
 
         ## Optimizer, loss function, device setup
-        self.optimizer = optim.AdamW(self.parameters(), lr=lr)
+        self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=0)
         # self.loss = nn.MSELoss()
         self.device = torch.device("mps" if torch.backends.mps.is_available() else 'cuda:0' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")

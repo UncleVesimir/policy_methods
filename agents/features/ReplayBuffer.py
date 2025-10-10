@@ -11,9 +11,10 @@ class ReplayBuffer():
         self.next_state_memory = np.zeros((self.mem_size, *input_dims), dtype=np.float32)
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
+        self.truncated_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=np.bool)
 
-    def store_transition(self, state, action, reward, next_state, done):
+    def store_transition(self, state, action, reward, next_state, truncated, terminal):
         # print("[RB/WRITE] in.state dtype/shape:", np.asarray(state).dtype, np.asarray(state).shape)
         # print("[RB/WRITE] in.next_state dtype/shape:", np.asarray(next_state).dtype, np.asarray(next_state).shape)
         # print("[RB/WRITE] in.action dtype:", np.asarray(action).dtype, "reward dtype:", np.asarray(reward).dtype, "done dtype:", np.asarray(done).dtype)
@@ -22,7 +23,8 @@ class ReplayBuffer():
         self.next_state_memory[index] = next_state
         self.action_memory[index] = action
         self.reward_memory[index] = reward
-        self.terminal_memory[index] = done
+        self.truncated_memory[index] = truncated
+        self.terminal_memory[index] = terminal
 
         self.mem_cntr += 1
 
@@ -36,8 +38,9 @@ class ReplayBuffer():
         actions = self.action_memory[batch]
         rewards = self.reward_memory[batch]
         next_states = self.next_state_memory[batch]
+        truncateds = self.truncated_memory[batch]
         terminals = self.terminal_memory[batch]
         # print("[RB/SAMPLE] states np dtype:", states.dtype, "next_states np dtype:", next_states.dtype)
         # print("[RB/SAMPLE]actions dtype:", actions.dtype, "rewards dtype:", rewards.dtype, "terminals dtype:", terminals.dtype)
 
-        return states, actions, rewards, next_states, terminals
+        return states, actions, rewards, next_states, truncateds, terminals
