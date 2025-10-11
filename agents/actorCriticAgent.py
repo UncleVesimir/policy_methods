@@ -21,7 +21,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         self.entropy_coef = entropy_coef
 
         self.checkpoint_dir = f"models/{model_name}/{sanitize_file_string(self.env_name)}"
-        self.filename_root = f"{model_name}_{sanitize_file_string(self.env_name)}_lr{self.learning_rate}_gamma{self.gamma}_eps{self.epsilon}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+        self.filename_root = f"{model_name}_{sanitize_file_string(self.env_name)}_lr{lr}_gamma{self.gamma}_eps{self.epsilon}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
         self.policy = ActorCriticNetwork(
             n_actions=self.n_actions,
@@ -66,7 +66,6 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
 
                 # optionally stop at truncation as if terminal (time-limit)
                 if truncateds[k] and treat_truncation_as_terminal:
-                    print("Truncation treated as terminal")
                     ended = True
                     break
 

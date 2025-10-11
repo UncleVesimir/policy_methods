@@ -28,7 +28,7 @@ def _make_env(
 ) -> gym.Env:
     """Builds an Atari env with preprocessing -> (4, 84, 84) float32 in [0,1]."""
     # Important: disable base frameskip so the wrapper controls it
-    env = gym.make(env_name, render_mode=("human" if render else "rgb_array"), frameskip=1)
+    env = gym.make(env_name, render_mode=("human" if render else None), frameskip=1)
     env = AtariPreprocessing(
         env,
         screen_size=screen_size,
@@ -90,6 +90,7 @@ def train(
     replace_target_every: int = 1000,
     models_dir: str = "models",
     mem_size: int = 100000,
+    window_step: int = 5,
     # Atari preprocessing knobs:
     screen_size: int = 84,
     grayscale: bool = True,
@@ -116,6 +117,7 @@ def train(
         replace_target_every: Hard update frequency for the target net
         models_dir: Root directory for model files & figures
         mem_size: Replay buffer size
+        window_step: Step size for n_step returns (only for n_step agents)
         screen_size: Preprocess to square size (default 84)
         grayscale: Use grayscale frames
         frame_skip: Frameskip inside AtariPreprocessing (base env frameskip is set to 1)
@@ -156,7 +158,8 @@ def train(
         learning_rate=lr,
         batch_size=batch_size,
         replace_limit=replace_target_every,
-        mem_size=mem_size
+        mem_size=mem_size,
+        n_step=window_step
     )
 
     # --- State Initialization ---
