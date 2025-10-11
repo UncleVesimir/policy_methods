@@ -27,7 +27,7 @@ class ActorCriticNetwork(nn.Module):
 
         fc_input_dims = self.calc_conv_out_dims(input_dims)
         self.fc1 = nn.Linear(fc_input_dims, 512)
-        self.actor = nn.Linear(512, n_actions) # the output here is the Q values of each action, given an input state (game frame)
+        self.actor = nn.Linear(512, n_actions) 
         self.critic = nn.Linear(512, 1)
 
         ## Optimizer, loss function, device setup
