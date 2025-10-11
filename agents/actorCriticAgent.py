@@ -14,7 +14,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         Based on Williams, R. J. (1992). Simple statistical gradient-following algorithms for connectionist reinforcement learning.
     """
 
-    def __init__(self, model_name="A2C", n_steps=6, value_coef=0.5, entropy_coef=0.01, lr=2.5e-4, *args, **kwargs):
+    def __init__(self, model_name="A2C", n_steps=6, value_coef=0.5, entropy_coef=0.03, lr=2.5e-4, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.n_steps = max(1, n_steps)
         self.value_coef = value_coef
@@ -66,6 +66,7 @@ def _compute_n_step_returns(self, rewards, truncateds, terminals,
 
             # optionally stop at truncation as if terminal (time-limit)
             if truncateds[k] and treat_truncation_as_terminal:
+                print("Truncation treated as terminal")
                 ended = True
                 break
 
@@ -116,7 +117,7 @@ def _compute_n_step_returns(self, rewards, truncateds, terminals,
             next_values,
             self.n_steps,
             self.gamma,
-            treat_truncation_as_terminal=False
+            treat_truncation_as_terminal=True
         )
 
         advantages = (targets - values).detach()
