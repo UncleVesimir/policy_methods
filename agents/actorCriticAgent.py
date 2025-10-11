@@ -69,7 +69,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         return returns
     
     def learn(self):
-        if not self.is_ready()
+        if not self.is_ready():
             return
         
         self.policy.optimizer.zero_grad()
