@@ -43,30 +43,49 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
 
         return action.item()
     
-    def _compute_n_step_returns(self, rewards: torch.Tensor, truncateds: torch.Tensor, terminals: torch.Tensor,
-                                V: torch.Tensor, V_next: torch.Tensor | None = None, n_steps: int = 1, gamma: float = 0.99,
-                                treat_truncation_as_terminal: bool = False
-                                ):
-        T = len(rewards)
-        returns = torch.zeros_like(rewards)
-        
-        for t in range(T):
-            ret = 0.0
-            discount = 1.0
-            for i in range(n_steps):
-                if t + i < T:
-                    ret += discount * rewards[t+i]
-                    if terminals[t+i]:
-                        break
-                    discount *= gamma
-            else: # if loop completed without break, we didn't terminate, so check if TD window is inbounds, and if not, check truncation
-                if t + n_steps < T:
-                    ret += discount * V[t+n_steps]
-                elif truncateds[-1] and not treat_truncation_as_terminal and V_next is not None: # TD step out of bounds, so check if truncated
+def _compute_n_step_returns(self, rewards, truncateds, terminals,
+                            V, V_next=None, n_steps=1, gamma=0.99,
+                            treat_truncation_as_terminal=False):
+    T = len(rewards)
+    returns = torch.zeros_like(rewards)
+
+    for t in range(T):
+        ret = 0.0
+        discount = 1.0
+        ended = False
+        for i in range(n_steps):
+            k = t + i
+            if k >= T:
+                break
+            ret += discount * rewards[k]
+
+            # stop at terminal
+            if terminals[k]:
+                ended = True
+                break
+
+            # optionally stop at truncation as if terminal (time-limit)
+            if truncateds[k] and treat_truncation_as_terminal:
+                ended = True
+                break
+
+            discount *= gamma
+
+        if not ended:
+            k = t + n_steps
+            if k < T:
+                # bootstrap from V(s_{t+n})
+                ret += discount * V[k]
+            else:
+                # window ran off the right edge of this rollout
+                if truncateds[-1] and not treat_truncation_as_terminal and V_next is not None:
+                    # bootstrap from value at the env-continued next state
                     ret += discount * V_next[-1]
-            returns[t] = ret
-            
-        return returns
+                # else: true terminal at the end → no bootstrap
+
+        returns[t] = ret
+    return returns
+
     
     def learn(self):
         if not self.is_ready():
