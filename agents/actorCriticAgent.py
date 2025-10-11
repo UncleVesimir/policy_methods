@@ -69,7 +69,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         return returns
     
     def learn(self):
-        if not self.is_ready() or not self.last_done_flag():
+        if not self.is_ready()
             return
         
         self.policy.optimizer.zero_grad()
@@ -129,8 +129,8 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
                 "V_loss": critic_loss.item(),
                 "grad_norm": grad_norm.item()
             })
+
         if self.last_done_flag():
             self.clear_rollout()
-            self.pop_left()
         else:
             self.pop_left()
