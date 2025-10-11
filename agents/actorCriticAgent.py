@@ -14,7 +14,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         Based on Williams, R. J. (1992). Simple statistical gradient-following algorithms for connectionist reinforcement learning.
     """
 
-    def __init__(self, model_name="DQN", n_steps=6, value_coef=0.5, entropy_coef=0.01, *args, **kwargs):
+    def __init__(self, model_name="A2C", n_steps=6, value_coef=0.5, entropy_coef=0.01, lr=2.5e-4 *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.n_steps = max(1, n_steps)
         self.value_coef = value_coef
@@ -26,7 +26,8 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         self.policy = ActorCriticNetwork(
             n_actions=self.n_actions,
             input_dims=self.input_dims,
-            file_name=self.filename_root + "_eval"
+            file_name=self.filename_root + "_eval",
+            lr=lr
         )
 
 
@@ -116,6 +117,7 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
         self.policy.optimizer.step()
 
         self.learn_step_cnt += 1
+
         if self.learn_step_cnt % 20 == 0:
             print({
                 "entropy": entropies.mean().item(),
@@ -127,4 +129,8 @@ class ActorCriticAgent(SlidingWindowBufferAgent):
                 "V_loss": critic_loss.item(),
                 "grad_norm": grad_norm.item()
             })
-        self.pop_left()
+        if self.last_done_flag():
+            self.clear_rollout()
+            self.pop_left()
+        else:
+            self.pop_left()
