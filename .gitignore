@@ -3,6 +3,10 @@
 
 # Python cache files
 __pycache__/
+**/__pycache__/
+agents/__pycache__
+networks/__pycache__
+
 *.pyc
 
 # Trained models and logs
