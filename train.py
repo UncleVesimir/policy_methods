@@ -85,7 +85,7 @@ def train(
     model: str = "REINFORCE",  # choices: Double_DQN, DQN, etc. (must exist in your Agents module)
     epsilon: float = 1.0,
     gamma: float = 0.99,
-    lr: float = 1e-4,
+    lr: float = 5e-4,
     batch_size: int = 32,
     replace_target_every: int = 1000,
     models_dir: str = "models",
@@ -185,7 +185,7 @@ def train(
 
     train_start_datetime = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
-    print(f"Commencing {model} training on {env} at {train_start_datetime}")
+    print(f"Commencing {model} training on {env} at {train_start_datetime} - lr: {lr}, gamma: {gamma}, eps: {epsilon}")
     for i in range(start_episode, episodes):
         state, _ = env_obj.reset()
         score, done = 0.0, False
