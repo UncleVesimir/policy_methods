@@ -22,7 +22,7 @@ class BaseAgent():
         self.env_name=env_name
 
         self.networks = []
-
+    # TODO: abstract this into a BaseValueAgent or something.
     def choose_action(self, state):
         device = self.networks[0].device
         if np.random.random() > self.epsilon:

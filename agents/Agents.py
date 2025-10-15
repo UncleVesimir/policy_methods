@@ -3,7 +3,7 @@ from agents.actorCriticAgent import ActorCriticAgent
 
 agents_dict = {
     "REINFORCE": REINFORCEAgent,
-    "AC2": ActorCriticAgent
+    "A2C": ActorCriticAgent
 }
 
-__all__ = ["REINFORCE", "AC2", "agents_dict"]
+__all__ = ["REINFORCE", "A2C", "agents_dict"]

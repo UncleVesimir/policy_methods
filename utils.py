@@ -1,5 +1,8 @@
+import math
 import numpy as np
 import matplotlib.pyplot as plt
+
+from collections import deque
 
 def plot_learning_curve(x, scores, epsilons, filename):
     fig = plt.figure()
@@ -27,3 +30,15 @@ def plot_learning_curve(x, scores, epsilons, filename):
 
 def sanitize_file_string(s):
     return (s).replace("/", "_").replace("\\", "_")
+
+
+
+class MovingAvg:
+    def __init__(self, k=20):
+        self.buf = deque(maxlen=k)
+    def add(self, x):
+        self.buf.append(float(x))
+        return self.value()
+    def value(self):
+        if not self.buf: return math.nan
+        return sum(self.buf) / len(self.buf)
