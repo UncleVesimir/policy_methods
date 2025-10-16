@@ -20,19 +20,22 @@ class ActorCriticAgent(FlexibleBufferAgent):
     Actor Critic Agent with flexible learning modes.
     """
 
-    def __init__(self, model_name="A2C", n_steps=20, value_coef=1,
-                 max_grad_norm=0.5, entropy_coef=0.001, lr=2.5e-4, mode='n_step', 
-                 warmup_episodes=50, n_envs: int = 1, vectorize_env: bool = False,
+    def __init__(self, model_name="A2C", n_steps=20, value_coef=.5, entropy_coef=0.001,
+                 gae_lambda=1.0, gamma=0.99,
+                 max_grad_norm=0.5,  lr=2.5e-4, mode='n_step'
+                 , n_envs: int = 1, vectorize_env: bool = False,
                  *args, **kwargs):
         
-        super().__init__(n_steps=n_steps, mode=mode, warmup_episodes=warmup_episodes, *args, **kwargs)
+        super().__init__(n_steps=n_steps, mode=mode, *args, **kwargs)
         self.model_name = model_name
         self.n_steps = n_steps
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
         self.mode = mode
-        self.warmup_episodes = warmup_episodes
         self.max_grad_norm = max_grad_norm
+        self.gae_lambda = gae_lambda
+        self.gamma = gamma
+
 
         # Multi-env values
         self.vectorize_env = vectorize_env
@@ -57,19 +60,24 @@ class ActorCriticAgent(FlexibleBufferAgent):
         # =========================
         # Tracking Metrics
         # =========================
+        self.env_step_count = 0
+        self.env_step_size = n_envs * n_steps if (vectorize_env and n_envs) else 1
+        self.learn_step_cnt = 0
         self.start_time = time.time()
         self.recent_returns = deque(maxlen=100)
         self.ep_ret = np.zeros(self.n_envs, dtype=np.float32)
 
 
-        self.hist_steps   = []
-        self.hist_rmean   = []   # mean100 episode reward
-        self.hist_pi_loss = []
-        self.hist_v_loss  = []
-        self.hist_ent     = []
+        self.hist_steps     = []
+        self.hist_rmean     = []   # mean100 episode reward
+        self.hist_pi_loss   = []
+        self.hist_v_loss    = []
+        self.hist_ent       = []
+        self.hist_ent_loss  = []
         self.ma_pi  = MovingAvg(k=20)
         self.ma_v   = MovingAvg(k=20)
         self.ma_ent = MovingAvg(k=20)
+        self.ma_ent_loss = MovingAvg(k=20)
 
 
     def is_ready(self):
@@ -110,7 +118,7 @@ class ActorCriticAgent(FlexibleBufferAgent):
         values,         
         next_values,
         gamma=0.99,
-        gae_lambda=1,
+        gae_lambda=1.0,
         treat_truncation_as_terminal: bool = False,
     ):
         """
@@ -167,13 +175,15 @@ class ActorCriticAgent(FlexibleBufferAgent):
         if self.vectorize_env:
             states = states.squeeze(0)
             actions = actions.squeeze(0)
-            rewards = rewards.squeeze(0) # This line was already corrected in the last diff
+            rewards = rewards.squeeze(0)
             next_states = next_states.squeeze(0)
             truncateds = truncateds.squeeze(0)
             terminals = terminals.squeeze(0)
 
             states = states.flatten(0, 1)
             actions = actions.flatten(0, 1)
+
+        # print(f"States: {states.shape}, Actions: {actions.shape}")
 
         with torch.no_grad():
             if self.vectorize_env:
@@ -182,31 +192,31 @@ class ActorCriticAgent(FlexibleBufferAgent):
                 _, next_values = self.policy(next_states)
 
         logits, values = self.policy(states)
+        logits = logits.clamp(-20, 20)
+        values = values.squeeze(-1)  # [B]
+
+
+        # print(f"LOGITS: mean: {logits.mean().item()}, std: {logits.std().item()}, abs: {logits.abs().max().item()}")
 
         dist = torch.distributions.Categorical(logits=logits)
         log_probs = dist.log_prob(actions)
         entropies = dist.entropy()
 
+        # print(f"Log probs: {log_probs.shape}, Entropies: {entropies.shape}, Values: {values.shape}, next_values: {next_values.shape}")
+
+
         # Use GAE for stable advantage estimation
         returns, advantages = self._compute_gae(
             rewards, truncateds, terminals,
             values.detach(), next_values,
-            self.gamma, gae_lambda=1.0
+            gamma=self.gamma, gae_lambda=self.gae_lambda
         )
-        
-        if self.vectorize_env:
-            rewards = rewards.sum(axis=0)
-            truncateds = truncateds.any(axis=0)
-            terminals = terminals.any(axis=0)
-            advantages = advantages.flatten(0, 1)
-            returns = returns.flatten(0, 1)
         
         
         with torch.no_grad():
-            # values is [B], flat_returns is [B]
             # Move to CPU for numpy ops if you like, but torch works fine:
             vr = returns
-            vpred = values.squeeze(-1)
+            vpred = values
             var_y = vr.var(unbiased=False)
             # print(((vr - vpred).var(unbiased=False) / (var_y + 1e-8)))
             ev = 1.0 - ((vr - vpred).var(unbiased=False) / (var_y + 1e-8))
@@ -236,30 +246,48 @@ class ActorCriticAgent(FlexibleBufferAgent):
         grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=self.max_grad_norm)
         self.policy.optimizer.step()
 
-        step_size = self.n_envs if (self.vectorize_env and self.n_envs) else 1
-        self.learn_step_cnt += step_size
+        self.learn_step_cnt += 1
+        self.env_step_count += self.env_step_size
 
-        dones = torch.logical_or(terminals, truncateds).cpu().numpy()
+        # print(f"rewards: {rewards.shape}, truncateds: {truncateds.shape}, terminals: {terminals.shape}")
+        if self.vectorize_env:
+            # rewards/terminals/truncateds are [T, N]
+            rew_np  = rewards.cpu().numpy().astype(np.float32)
+            term_np = terminals.cpu().numpy().astype(bool)
+            trunc_np= truncateds.cpu().numpy().astype(bool)
 
-        self.ep_ret += rewards.cpu().numpy()
+            for t in range(rew_np.shape[0]):           # iterate over time
+                self.ep_ret += rew_np[t]               # add step rewards per-env
+                done = np.logical_or(term_np[t], trunc_np[t])
+                if done.any():
+                    idx = np.where(done)[0]
+                    for i in idx:
+                        self.recent_returns.append(float(self.ep_ret[i]))
+                        self.ep_ret[i] = 0.0
+        else:
+            # Non-vector env: rewards/terminals/truncateds are [T]
+            rew_np  = rewards.cpu().numpy().astype(np.float32)
+            term_np = terminals.cpu().numpy().astype(bool)
+            trunc_np= truncateds.cpu().numpy().astype(bool)
 
-        if dones.any():
-                finished = np.where(dones)[0]
-                for i in finished:
-                    self.recent_returns.append(float(self.ep_ret[i]))
-                    # reset counters for that sub-env
-                    self.ep_ret[i] = 0.0
+            for t in range(rew_np.shape[0]):
+                self.ep_ret[0] += rew_np[t]
+                if term_np[t] or trunc_np[t]:
+                    self.recent_returns.append(float(self.ep_ret[0]))
+                    self.ep_ret[0] = 0.0
+        
 
         r_mean100 = float(np.mean(self.recent_returns)) if len(self.recent_returns) > 0 else np.nan
 
-        self.hist_steps.append(self.learn_step_cnt)
+        self.hist_steps.append(self.env_step_count)
         self.hist_rmean.append(r_mean100)
         self.hist_pi_loss.append(self.ma_pi.add(policy_loss.item()))
         self.hist_v_loss.append(self.ma_v.add(value_loss.item()))
-        self.hist_ent.append(self.ma_ent.add((-entropy_loss).item())) 
+        self.hist_ent_loss.append(self.ma_ent_loss.add((-entropy_loss).item()))
+        self.hist_ent.append(self.ma_ent.add((entropies.mean()).item()))
 
 
-        if self.learn_step_cnt % 20 == 0:
+        if self.env_step_count % (self.env_step_size)== 0:
             # print({
             #     "ep": self.episode_count,
             #     "buffer": len(rewards),
@@ -273,7 +301,7 @@ class ActorCriticAgent(FlexibleBufferAgent):
             #     "grad": f"{grad_norm.item():.1f}"
             # })
             
-            sps = int(self.learn_step_cnt / (time.time() - self.start_time))
+            sps = int(self.env_step_count / (time.time() - self.start_time))
 
             if len(self.recent_returns) > 0:
                 r_last   = self.recent_returns[-1]
@@ -285,15 +313,22 @@ class ActorCriticAgent(FlexibleBufferAgent):
                 reward_msg = "R/last=NA | R/mean100=NA | R/med100=NA | ep_count=0"
 
             print(
-                f"steps={self.learn_step_cnt:,} | "
+                f"steps={self.env_step_count:,} | "
                 f"loss={loss.item():.3f} | pi={policy_loss.item():.3f} | "
-                f"v_loss={value_loss.item():.3f} | ent={-entropy_loss.item():.3f} | "
+                f"v_loss={value_loss.item():.3f} | H={entropies.mean().item():.3f} | ent_coef*H={(-entropy_loss):.3f} |"
                 f"sps={sps} | {reward_msg}"
                 f" | grad_norm={total_grad_norm:.3f} | ev={ev:.3f}"
             )
 
-        if self.learn_step_cnt % 100_000 == 0:
-            _, axs = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
+        if self.learn_step_cnt % 100 == 0:
+            print("\nDEBUG:")
+            print("returns mean/std:", returns.mean().item(), returns.std(unbiased=False).item())
+            print("values mean/std:", values.mean().item(), values.std(unbiased=False).item())
+            print("logits mean/std:", logits.mean().item(), logits.std(unbiased=False).item(), "\n")
+
+
+
+            _, axs = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
 
             # ----------------------------
             # (1) Episodic reward curve
@@ -309,15 +344,21 @@ class ActorCriticAgent(FlexibleBufferAgent):
             # ----------------------------
             axs[1].plot(self.hist_steps, self.hist_pi_loss, label="Policy loss (MA)", color="tab:orange", alpha=0.9)
             axs[1].plot(self.hist_steps, self.hist_v_loss, label="Value loss (MA)", color="tab:green", alpha=0.9)
-            axs[1].plot(self.hist_steps, self.hist_ent, label="Entropy (MA)", color="tab:red", alpha=0.9)
+            axs[1].plot(self.hist_steps, self.hist_ent_loss, label="Entropy loss (MA)", color="tab:red", alpha=0.9)
             axs[1].set_xlabel("Env steps")
-            axs[1].set_ylabel("Loss / Entropy")
-            axs[1].set_title(f"{self.model_name} — Losses & Entropy")
+            axs[1].set_ylabel("Loss")
+            axs[1].set_title(f"{self.model_name} — Losses")
             axs[1].grid(True, linewidth=0.3)
             axs[1].legend(loc="upper right")
 
+            axs[2].plot(self.hist_steps, self.hist_ent, label="Entropy", color="tab:red", alpha=0.9)
+            axs[2].set_xlabel("Env steps")
+            axs[2].set_ylabel("Entropy")
+            axs[2].set_title(f"{self.model_name} — Entropy")
+            axs[2].grid(True, linewidth=0.3)
+            axs[2].legend(loc="upper right")
+
             plt.tight_layout()
-            #TODO make this filepath dynamc
             plt.savefig(f"models/{self.model_name}/figures/{self.filename_root}.png", dpi=130)
             plt.close()
 
@@ -326,10 +367,11 @@ class ActorCriticAgent(FlexibleBufferAgent):
             self.episode_count += 1
             self.clear_rollout()
         elif self.mode == 'n_step':
-            self.pop_left()
-        elif self.mode == 'hybrid' and self.episode_count >= self.warmup_episodes:
-            if len(self.state_memory) >= self.n_steps * 2:
-                self.clear_rollout()
+            self.clear_rollout()
+            # self.pop_left()
+        # elif self.mode == 'hybrid' and self.episode_count >= self.warmup_episodes:
+        #     if len(self.state_memory) >= self.n_steps * 2:
+        #         self.clear_rollout()
 
     def calc_total_grad_norm(self):
         total_grad_norm = 0.0

@@ -211,7 +211,7 @@ def train(
         env_name=env,
         epsilon=epsilon,
         gamma=gamma,
-        learning_rate=lr,
+        lr=lr,
         batch_size=batch_size,
         replace_limit=replace_target_every,
         mem_size=mem_size,
@@ -279,7 +279,7 @@ def train(
             if not load_model_checkpoint:
                 agent.store_transition(state_buf, actions_buf, rew_buf, next_state_buf, trunc_buf, term_buf)
                 agent.learn()
-                                 
+                              
     else:
         for i in range(start_episode, episodes):
             state, _ = env_obj.reset()
@@ -330,7 +330,7 @@ def train(
                 with open(checkpoint_file, 'w') as f:
                     json.dump(training_state, f, indent=4)
 
-    plot_learning_curve(steps_array, scores, eps_history, filename=fig_path)
+    # plot_learning_curve(steps_array, scores, eps_history, filename=fig_path)
     print(f"Saved learning curve to: {fig_path}")
 
 

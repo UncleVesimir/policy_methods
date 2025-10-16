@@ -273,7 +273,6 @@ def main():
     # Rolling stats
     recent_returns = deque(maxlen=100)
     ep_ret = np.zeros(N_ENVS, dtype=np.float32)
-    ep_len = np.zeros(N_ENVS, dtype=np.int32)
 
 
     H, W, C = 84, 84, 4  # for asserts
@@ -325,7 +324,6 @@ def main():
             global_steps += N_ENVS
              # --- episodic logging state update ---
             ep_ret += reward.astype(np.float32)
-            ep_len += 1
 
           
 
@@ -336,7 +334,7 @@ def main():
                     recent_returns.append(float(ep_ret[i]))
                     # reset counters for that sub-env
                     ep_ret[i] = 0.0
-                    ep_len[i] = 0
+
 
 
 
@@ -383,6 +381,7 @@ def main():
 
         optimizer.zero_grad()
         loss.backward()
+        
         total_grad_norm = 0.0
         for p in model.parameters():
             if p.grad is not None:

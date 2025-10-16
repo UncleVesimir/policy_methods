@@ -11,14 +11,13 @@ import torch.optim as optim
 
 
 class ActorCriticNetwork(nn.Module):
-    def __init__(self, n_actions=None, input_dims=None, file_name=None, lr=1e-4, checkpoint_dir="models/Unknown"):
+    def __init__(self, n_actions=None, input_dims=None, file_name=None, lr=2.5e-4, checkpoint_dir="models/Unknown"):
         super().__init__()
         if n_actions is None or input_dims is None or file_name is None:
             raise ValueError("n_actions, input_dims, and file_name must be provided.")
         
         self.mdl_checkpoint_dir = checkpoint_dir
         self.mdl_checkpoin_filename = os.path.join(self.mdl_checkpoint_dir, file_name)
-        
 
         #Main Network setup
         self.conv1 = nn.Conv2d(input_dims[0], 32, 8, stride=4)
@@ -31,6 +30,7 @@ class ActorCriticNetwork(nn.Module):
         self.critic = nn.Linear(512, 1)
 
         ## Optimizer, loss function, device setup
+        # self.optimizer = optim.RMSProp(self.parameters(), lr=lr, alpha=0.99, eps=1e-5)
         self.optimizer = optim.AdamW(self.parameters(), lr=lr, weight_decay=0)
         # self.loss = nn.MSELoss()
         self.device = torch.device("mps" if torch.backends.mps.is_available() else 'cuda:0' if torch.cuda.is_available() else 'cpu')
